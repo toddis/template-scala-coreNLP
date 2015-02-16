@@ -30,17 +30,13 @@ class DataSource(val dsp: DataSourceParams)
       appId = dsp.appId,
       entityType = "user",
       // only keep entities with these required properties defined
-      required = Some(List("plan", "attr0", "attr1", "attr2")))(sc)
+      required = Some(List("attr0", "attr1")))(sc)
       // aggregateProperties() returns RDD pair of
       // entity ID and its aggregated properties
       .map { case (entityId, properties) =>
         try {
-          LabeledPoint(properties.get[Double]("plan"),
-            Vectors.dense(Array(
-              properties.get[Double]("attr0"),
-              properties.get[Double]("attr1"),
-              properties.get[Double]("attr2")
-            ))
+          LabeledPoint(properties.get[Int]("attr0"),
+            properties.get("attr1")
           )
         } catch {
           case e: Exception => {

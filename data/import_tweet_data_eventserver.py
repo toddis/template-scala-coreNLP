@@ -19,8 +19,8 @@ def import_events(client, file):
       entity_type="user",
       entity_id=str(count), # use the count num as user ID
       properties= {
-        "attr0" : int(sentiment),
-        "attr1" : tweet
+        "sentiment" : int(sentiment),
+        "tweet" : tweet
       }
     )
     count += 1
@@ -32,7 +32,7 @@ if __name__ == '__main__':
     description="Import small tweet data for classification engine")
   parser.add_argument('--access_key', default='invald_access_key')
   parser.add_argument('--url', default="http://localhost:7070")
-  parser.add_argument('--file', default="./data/small_sentiment_analysis_dataset_2048.txt")
+  parser.add_argument('--file', default="./data/small_sentiment_analysis_dataset_1024.txt")
 
   args = parser.parse_args()
   print args

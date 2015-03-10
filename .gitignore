@@ -1,2 +1,6 @@
 data/*.txt
 manifest.json
+
+.idea/
+target/
+.project

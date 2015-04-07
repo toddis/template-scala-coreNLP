@@ -18,7 +18,7 @@ import java.util.Scanner
 import org.json4s.JsonAST.JValue
 import org.template.classification.TrainingData
 
-import scala.collection.mutable.{HashMap, HashSet}
+import scala.collection.mutable.{ArrayBuffer, HashMap, HashSet}
 
 import grizzled.slf4j.Logger
 
@@ -32,12 +32,8 @@ class DataSource(val dsp: DataSourceParams)
 
   override
   def readTraining(sc: SparkContext): TrainingData = {
-    logger.error("made it here A")
     val eventsDb = Storage.getPEvents()
-    var tweetCount = 0
-    val dictSet = new HashSet[String]()
-    val entityIdWordCountMap = new HashMap[Int, HashMap[String, Int]]
-    val wordDocCount = new HashMap[String, Int]
+
     // Hack to iterate over data. How to do this properly?
     //    eventsDb.aggregateProperties(
     //      appId = dsp.appId,
@@ -63,20 +59,80 @@ class DataSource(val dsp: DataSourceParams)
     //      }
     //    }
 
-    logger.error("Made it here B")
-    val items: EntityMap[TweetSentiment] = eventsDb.extractEntityMap[TweetSentiment](
+    val items: RDD[(String, TweetSentiment)] = eventsDb.aggregateProperties(
       appId = dsp.appId,
       entityType = "user",
       required = Some(Seq("sentiment", "tweet"))
-    )(sc) { dm =>
-      TweetSentiment(
-        //sentiment = if (dm.get[Int]("sentiment") == 1) true else false,
-        sentiment = dm.get[Int]("sentiment"),
-        tweet = dm.get[String]("tweet")
+    )(sc).map {  case (entityId, properties) =>
+      val ts = TweetSentiment(
+        //sentiment = if (properties.get[Int]("sentiment") == 1) true else false,
+        sentiment = properties.get[Int]("sentiment"),
+        tweet = properties.get[String]("tweet")
       )
+      (entityId, ts)
     }
 
-    logger.error("dataMap size = " + items.size)
+    val itemCount = items.count()
+    logger.info("dataMap size = " + itemCount)
+
+    var dictSet = new HashSet[String]()
+    val entityIdWordCountMap = new HashMap[Int, HashMap[String, Int]]
+    val wordDocCount = new HashMap[String, Int]
+
+    var tweetNum = 0
+
+    val id2tweetsentiment = new HashMap[Int, Int]
+    for (e <- items) {
+      id2tweetsentiment.put(e._1.toInt, e._2.sentiment)
+      tweetNum += 1
+      stemAndTokenize(e._1.toInt, e._2.tweet, dictSet, entityIdWordCountMap, wordDocCount)
+
+      if (tweetNum == itemCount) {
+        val dict = dictSet.toArray
+        dict.sortWith(_.compareTo(_) < 0)
+        val dictIndexes = getIndexMap(dict)
+
+        // Calculating Inverse Document Frequency
+        val idfs = new Array[Double](dict.length)
+        for (i <- 0 until dict.length) {
+          idfs(i) = (itemCount * 1.0) / wordDocCount(dict(i))
+        }
+
+        // Get stuff
+        val seqResult = new ArrayBuffer[LabeledPoint]
+        for ((id, sentiment) <- id2tweetsentiment) {
+          // Get data array
+          val data = new ArrayBuffer[Tuple2[Int, Double]]
+          if (entityIdWordCountMap.contains(id)) {
+            for ((word, count) <- entityIdWordCountMap(id)) {
+              if (count != 0) {
+                val index = dictIndexes(word)
+                data += new Tuple2(index, count * idfs(index))
+              }
+            }
+          }
+          val lp = LabeledPoint(sentiment, Vectors.sparse(dict.length, data))
+          seqResult += lp
+        }
+        logger.info("num Labled Points: " + seqResult.size)
+
+
+        // make RDD
+        val result: RDD[LabeledPoint] = items.map { id2tweetSentiment =>
+          seqResult(id2tweetSentiment._1.toInt)
+        }
+
+        return new TrainingData(result)
+
+      }
+    }
+
+
+    //logger.info("dictSet size = " + dictSet.size)
+    //logger.info("entityIdWordCountMap size = " + entityIdWordCountMap.size)
+    //logger.info("wordDocCount size = " + wordDocCount)
+
+
 
     //    val dict = dictSet.toArray
     //    dict.sortWith(_.compareTo(_) < 0)
@@ -119,12 +175,13 @@ class DataSource(val dsp: DataSourceParams)
     //        }
     //      }
 
-    new TrainingData(null)
+    return new TrainingData(null)
   }
 
   def stemAndTokenize(entityId: Int, tweet: String, dict: HashSet[String], entityIdWordCountMap: HashMap[Int, HashMap[String, Int]], wordDocCount: HashMap[String, Int]) {
     val scanner = new Scanner(tweet)
     //val stemmer = new Morphology()
+
 
     assert(!entityIdWordCountMap.contains(entityId))
     val wordCountMap = new HashMap[String, Int]
@@ -152,6 +209,7 @@ class DataSource(val dsp: DataSourceParams)
       }
       wordDocCount.put(word, wordDocCount(word) + 1)
     }
+
   }
 
   def getIndexMap(dict: Array[String]) : HashMap[String, Int] = {
@@ -166,10 +224,10 @@ class DataSource(val dsp: DataSourceParams)
 }
 
 case class TweetSentiment(
-                           sentiment: Int,
-                           tweet: String
-                           )
+     sentiment: Int,
+     tweet: String
+     )
 
 class TrainingData(
-                    val labeledPoints: RDD[LabeledPoint]
-                    ) extends Serializable
+  val labeledPoints: RDD[LabeledPoint]
+) extends Serializable

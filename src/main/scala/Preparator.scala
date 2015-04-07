@@ -25,16 +25,6 @@ class PreparedData(
 class Preparator extends PPreparator[TrainingData, PreparedData] {
 
   def prepare(sc: SparkContext, trainingData: TrainingData): PreparedData = {
-
-
-    var gatheredInfo = List.empty[Map[Int, Map[String, Int]]]
-
-    for (point <- trainingData.labeledPoints) {
-
-    }
-
-
-
     new PreparedData(trainingData.labeledPoints)
   }
 }
